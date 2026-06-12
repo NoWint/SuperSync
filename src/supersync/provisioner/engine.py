@@ -225,13 +225,13 @@ class ProvisionerEngine:
     def _execute_step(self, step: Step) -> InstallResult:
         self.logger.info("Executing: %s %s", step.type.name, step.name)
         if step.type == StepType.BREW_FORMULA:
-            return self.installer.install_brew_formula(step.name, step.version or "")
+            return self.installer.install_brew_formula(step.name, step.version or "", auto_confirm=self.auto_confirm)
         elif step.type == StepType.BREW_CASK:
-            return self.installer.install_brew_cask(step.name, step.version or "")
+            return self.installer.install_brew_cask(step.name, step.version or "", auto_confirm=self.auto_confirm)
         elif step.type == StepType.PIP_PACKAGE:
-            return self.installer.install_pip_package(step.name, step.version or "")
+            return self.installer.install_pip_package(step.name, step.version or "", auto_confirm=self.auto_confirm)
         elif step.type == StepType.NPM_PACKAGE:
-            return self.installer.install_npm_package(step.name, step.version or "")
+            return self.installer.install_npm_package(step.name, step.version or "", auto_confirm=self.auto_confirm)
         elif step.type == StepType.ENV_VAR:
             return self.installer.inject_env_var(step.name, step.content or "", config_file=step.extra.get("config_file", ".zshrc"))
         elif step.type == StepType.DOTFILE:
