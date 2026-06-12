@@ -51,6 +51,8 @@ class Installer:
     def install_npm_package(self, name: str, version: str) -> InstallResult:
         result = run_command("npm", "install", "-g", f"{name}@{version}", check=False)
         if result.returncode == 0:
+            if "up to date" in result.stdout.lower() or "added" not in result.stdout.lower():
+                return InstallResult(name=name, status=InstallStatus.SKIPPED, message="Already installed")
             return InstallResult(name=name, status=InstallStatus.SUCCESS)
         else:
             return InstallResult(name=name, status=InstallStatus.FAILED, message=result.stderr.strip())
@@ -84,16 +86,27 @@ class Installer:
         except Exception as e:
             return InstallResult(name=key, status=InstallStatus.FAILED, message=str(e))
 
-    def deploy_dotfile(self, rel_path: str, content_b64: str, backup: bool = True) -> InstallResult:
+    def deploy_dotfile(self, rel_path: str, content_b64: str, backup: bool = True, conflict_action: str = "backup") -> InstallResult:
+        """Deploy a dotfile from base64-encoded content.
+
+        Args:
+            rel_path: Relative path from home directory.
+            content_b64: Base64-encoded file content.
+            backup: Whether to create backup of existing file.
+            conflict_action: How to handle existing files - "backup", "skip", or "overwrite".
+        """
         import base64
         from pathlib import Path
 
         target = Path.home() / rel_path
 
         try:
-            if target.exists() and backup:
-                backup_path = Path(str(target) + ".supersync.bak")
-                backup_path.write_bytes(target.read_bytes())
+            if target.exists():
+                if conflict_action == "skip":
+                    return InstallResult(name=rel_path, status=InstallStatus.SKIPPED, message="Skipped (file exists)")
+                if backup:
+                    backup_path = Path(str(target) + ".supersync.bak")
+                    backup_path.write_bytes(target.read_bytes())
 
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(base64.b64decode(content_b64))

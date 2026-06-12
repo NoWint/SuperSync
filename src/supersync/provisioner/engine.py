@@ -3,6 +3,7 @@ from typing import Optional
 
 from supersync.manifest.schema import Manifest
 from supersync.provisioner.dependency import Step, StepType, topological_sort
+from supersync.provisioner.conflict import ConflictDetector, ConflictType
 from supersync.provisioner.installer import Installer, InstallResult, InstallStatus
 
 
@@ -125,12 +126,38 @@ class ProvisionerEngine:
                     name=ext,
                     source=ide_name,
                 ))
+            if ide_config.settings_content:
+                steps.append(Step(
+                    type=StepType.VSCODE_SETTINGS,
+                    name="settings.json",
+                    content=ide_config.settings_content,
+                    path=ide_config.settings_path,
+                    source=ide_name,
+                ))
 
         return topological_sort(steps)
 
     def run(self) -> RestoreReport:
         steps = self._generate_steps()
         report = RestoreReport()
+
+        # Before executing steps, detect conflicts
+        if not self.dry_run:
+            detector = ConflictDetector()
+            dotfile_dicts = [
+                {"path": df.path, "content": df.content}
+                for df in self.manifest.dotfiles
+            ]
+            from pathlib import Path
+            conflicts = detector.detect_dotfile_conflicts(dotfile_dicts, Path.home())
+
+            if conflicts and not self.auto_confirm:
+                for conflict in conflicts:
+                    console_msg = f"[yellow]Conflict:[/yellow] {conflict.message}"
+                    if self.auto_confirm:
+                        continue
+                    # For now, auto-backup conflicting files
+                    pass
 
         current_category = ""
         category_report: Optional[CategoryReport] = None
@@ -166,6 +193,7 @@ class ProvisionerEngine:
             StepType.ENV_VAR: "env_vars",
             StepType.DOTFILE: "dotfiles",
             StepType.IDE_EXTENSION: "vscode",
+            StepType.VSCODE_SETTINGS: "vscode",
         }
         return mapping.get(step.type, step.source)
 
@@ -181,8 +209,10 @@ class ProvisionerEngine:
         elif step.type == StepType.ENV_VAR:
             return self.installer.inject_env_var(step.name, step.content or "")
         elif step.type == StepType.DOTFILE:
-            return self.installer.deploy_dotfile(step.name, step.content or "")
+            return self.installer.deploy_dotfile(step.name, step.content or "", backup=True)
         elif step.type == StepType.IDE_EXTENSION:
             return self.installer.install_vscode_extension(step.name)
+        elif step.type == StepType.VSCODE_SETTINGS:
+            return self.installer.deploy_dotfile(step.path or step.name, step.content or "")
         else:
             return InstallResult(name=step.name, status=InstallStatus.FAILED, message="Unknown step type")

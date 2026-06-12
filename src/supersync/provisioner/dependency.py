@@ -11,6 +11,7 @@ class StepType(IntEnum):
     ENV_VAR = 30
     DOTFILE = 40
     IDE_EXTENSION = 50
+    VSCODE_SETTINGS = 51
 
 
 @dataclass
