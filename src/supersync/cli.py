@@ -484,6 +484,55 @@ def inspect(
         console.print(f"  VS Code extensions: {len(manifest.ide['vscode'].extensions)}")
 
 
+@app.command()
+def update(
+    check: bool = typer.Option(False, "--check", help="Only check for updates, don't prompt to install"),
+) -> None:
+    """Check for SuperSync updates."""
+    import json
+    import urllib.request
+
+    try:
+        url = "https://api.github.com/repos/NoWint/SuperSync/releases/latest"
+        req = urllib.request.Request(url, headers={"User-Agent": "SuperSync"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+
+        latest = data.get("tag_name", "").lstrip("v")
+        html_url = data.get("html_url", "")
+
+    except Exception as e:
+        console.print(f"[red]Failed to check for updates: {e}[/red]")
+        raise typer.Exit(code=1)
+
+    console.print(f"  Current version: [cyan]{__version__}[/cyan]")
+    console.print(f"  Latest version:  [cyan]{latest}[/cyan]")
+
+    if latest == __version__:
+        console.print("[green]Already up to date![/green]")
+        return
+
+    console.print(f"[yellow]New version available![/yellow]")
+    console.print(f"  Release notes: {html_url}")
+
+    if check:
+        return
+
+    action = typer.prompt("Update now?", type=typer.Choice(["yes", "no"]), default="yes")
+    if action == "yes":
+        import subprocess
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--upgrade", "git+https://github.com/NoWint/SuperSync.git"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            console.print("[green]Updated successfully![/green]")
+        else:
+            console.print(f"[red]Update failed: {result.stderr}[/red]")
+            raise typer.Exit(code=1)
+
+
 @app.command(name="list")
 def list_items(
     file: str = typer.Argument(..., help="Path to .supersync file"),

@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from enum import Enum
+from typing import Optional
 
 from supersync.utils.run import run_command
 
@@ -21,34 +22,148 @@ class InstallResult:
 class Installer:
     """Handles package installation for various package managers."""
 
-    def install_brew_formula(self, name: str, version: str) -> InstallResult:
+    def _get_installed_version(self, manager: str, name: str) -> Optional[str]:
+        """Check if a package is already installed and return its version."""
+        if manager == "brew":
+            result = run_command("brew", "list", "--formula", "--versions", name, check=False)
+            if result.returncode == 0 and name in result.stdout:
+                # Output format: "name version"
+                parts = result.stdout.strip().split()
+                if len(parts) >= 2:
+                    return parts[-1]
+            result = run_command("brew", "list", "--cask", "--versions", name, check=False)
+            if result.returncode == 0 and name in result.stdout:
+                parts = result.stdout.strip().split()
+                if len(parts) >= 2:
+                    return parts[-1]
+        elif manager == "pip":
+            result = run_command("pip", "show", name, check=False)
+            if result.returncode == 0:
+                for line in result.stdout.splitlines():
+                    if line.startswith("Version:"):
+                        return line.split(":", 1)[1].strip()
+        elif manager == "npm":
+            result = run_command("npm", "list", "-g", name, "--depth=0", "--json", check=False)
+            if result.returncode == 0:
+                import json
+                try:
+                    data = json.loads(result.stdout)
+                    deps = data.get("dependencies", {})
+                    if name in deps:
+                        return deps[name].get("version")
+                except (json.JSONDecodeError, KeyError):
+                    pass
+        return None
+
+    def install_brew_formula(self, name: str, version: str, auto_confirm: bool = False) -> InstallResult:
+        installed = self._get_installed_version("brew", name)
+        if installed:
+            if installed == version.lstrip("="):
+                return InstallResult(name=name, status=InstallStatus.SKIPPED, message=f"Already installed v{installed}")
+            if not auto_confirm:
+                import typer
+                action = typer.prompt(
+                    f"  {name}: installed v{installed}, snapshot v{version}. Action",
+                    type=typer.Choice(["skip", "upgrade"]),
+                    default="skip",
+                )
+                if action == "skip":
+                    return InstallResult(name=name, status=InstallStatus.SKIPPED, message=f"Kept v{installed}")
+            # upgrade
+            result = run_command("brew", "upgrade", name, check=False)
+            if result.returncode == 0:
+                return InstallResult(name=name, status=InstallStatus.SUCCESS)
+            # If upgrade fails, try install
+            result = run_command("brew", "install", name, check=False)
+            if result.returncode == 0:
+                return InstallResult(name=name, status=InstallStatus.SUCCESS)
+            return InstallResult(name=name, status=InstallStatus.FAILED, message=result.stderr.strip())
+
         result = run_command("brew", "install", name, check=False)
         if result.returncode == 0:
             return InstallResult(name=name, status=InstallStatus.SUCCESS)
-        elif "already installed" in result.stderr or "already installed" in result.stdout:
+        if "already installed" in result.stderr.lower():
             return InstallResult(name=name, status=InstallStatus.SKIPPED, message="Already installed")
-        else:
+        return InstallResult(name=name, status=InstallStatus.FAILED, message=result.stderr.strip())
+
+    def install_brew_cask(self, name: str, version: str, auto_confirm: bool = False) -> InstallResult:
+        installed = self._get_installed_version("brew", name)
+        if installed:
+            if installed == version.lstrip("="):
+                return InstallResult(name=name, status=InstallStatus.SKIPPED, message=f"Already installed v{installed}")
+            if not auto_confirm:
+                import typer
+                action = typer.prompt(
+                    f"  {name}: installed v{installed}, snapshot v{version}. Action",
+                    type=typer.Choice(["skip", "upgrade"]),
+                    default="skip",
+                )
+                if action == "skip":
+                    return InstallResult(name=name, status=InstallStatus.SKIPPED, message=f"Kept v{installed}")
+            # upgrade
+            result = run_command("brew", "upgrade", "--cask", name, check=False)
+            if result.returncode == 0:
+                return InstallResult(name=name, status=InstallStatus.SUCCESS)
+            # If upgrade fails, try install
+            result = run_command("brew", "install", "--cask", name, check=False)
+            if result.returncode == 0:
+                return InstallResult(name=name, status=InstallStatus.SUCCESS)
             return InstallResult(name=name, status=InstallStatus.FAILED, message=result.stderr.strip())
 
-    def install_brew_cask(self, name: str, version: str) -> InstallResult:
         result = run_command("brew", "install", "--cask", name, check=False)
         if result.returncode == 0:
             return InstallResult(name=name, status=InstallStatus.SUCCESS)
-        elif "already installed" in result.stderr or "already installed" in result.stdout:
+        if "already installed" in result.stderr.lower() or "already installed" in result.stdout.lower():
             return InstallResult(name=name, status=InstallStatus.SKIPPED, message="Already installed")
-        else:
+        return InstallResult(name=name, status=InstallStatus.FAILED, message=result.stderr.strip())
+
+    def install_pip_package(self, name: str, version: str, auto_confirm: bool = False) -> InstallResult:
+        installed = self._get_installed_version("pip", name)
+        if installed:
+            if installed == version.lstrip("="):
+                return InstallResult(name=name, status=InstallStatus.SKIPPED, message=f"Already installed v{installed}")
+            if not auto_confirm:
+                import typer
+                action = typer.prompt(
+                    f"  {name}: installed v{installed}, snapshot v{version}. Action",
+                    type=typer.Choice(["skip", "upgrade"]),
+                    default="skip",
+                )
+                if action == "skip":
+                    return InstallResult(name=name, status=InstallStatus.SKIPPED, message=f"Kept v{installed}")
+            # upgrade
+            result = run_command("pip", "install", "--upgrade", f"{name}=={version}", check=False)
+            if result.returncode == 0:
+                return InstallResult(name=name, status=InstallStatus.SUCCESS)
             return InstallResult(name=name, status=InstallStatus.FAILED, message=result.stderr.strip())
 
-    def install_pip_package(self, name: str, version: str) -> InstallResult:
         result = run_command("pip", "install", f"{name}=={version}", check=False)
         if result.returncode == 0:
             return InstallResult(name=name, status=InstallStatus.SUCCESS)
-        elif "already satisfied" in result.stdout.lower():
+        if "already satisfied" in result.stdout.lower():
             return InstallResult(name=name, status=InstallStatus.SKIPPED, message="Already installed")
-        else:
+        return InstallResult(name=name, status=InstallStatus.FAILED, message=result.stderr.strip())
+
+    def install_npm_package(self, name: str, version: str, auto_confirm: bool = False) -> InstallResult:
+        installed = self._get_installed_version("npm", name)
+        if installed:
+            if installed == version.lstrip("="):
+                return InstallResult(name=name, status=InstallStatus.SKIPPED, message=f"Already installed v{installed}")
+            if not auto_confirm:
+                import typer
+                action = typer.prompt(
+                    f"  {name}: installed v{installed}, snapshot v{version}. Action",
+                    type=typer.Choice(["skip", "upgrade"]),
+                    default="skip",
+                )
+                if action == "skip":
+                    return InstallResult(name=name, status=InstallStatus.SKIPPED, message=f"Kept v{installed}")
+            # upgrade
+            result = run_command("npm", "install", "-g", f"{name}@{version}", check=False)
+            if result.returncode == 0:
+                return InstallResult(name=name, status=InstallStatus.SUCCESS)
             return InstallResult(name=name, status=InstallStatus.FAILED, message=result.stderr.strip())
 
-    def install_npm_package(self, name: str, version: str) -> InstallResult:
         result = run_command("npm", "install", "-g", f"{name}@{version}", check=False)
         if result.returncode == 0:
             if "up to date" in result.stdout.lower() or "added" not in result.stdout.lower():

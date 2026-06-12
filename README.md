@@ -87,6 +87,16 @@ supersync inspect env.supersync
 
 解密后显示快照中的环境摘要，不执行任何安装操作。
 
+### 检查更新
+
+```bash
+# Check for updates
+supersync update --check
+
+# Update to latest version
+supersync update
+```
+
 ## 安全设计
 
 - **AES-256-GCM 加密**：快照文件使用 PBKDF2 密钥派生（100,000 次迭代）+ AES-256-GCM 认证加密
