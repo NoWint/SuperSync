@@ -297,6 +297,135 @@ def restore(
 
 
 @app.command()
+def diff(
+    file: str = typer.Argument(..., help="Path to .supersync file to compare against"),
+) -> None:
+    """Compare current environment with a .supersync snapshot."""
+    from supersync.manifest.crypto import decrypt_data
+    from supersync.manifest.serializer import deserialize_manifest
+
+    file_path = Path(file)
+    if not file_path.exists():
+        console.print(f"[red]File not found: {file_path}[/red]")
+        raise typer.Exit(code=1)
+
+    password = typer.prompt("Enter decryption password", hide_input=True)
+
+    try:
+        encrypted_data = file_path.read_bytes()
+        yaml_data = decrypt_data(encrypted_data, password)
+        manifest = deserialize_manifest(yaml_data.decode("utf-8"))
+    except Exception as e:
+        console.print(f"[red]Decryption failed: {e}[/red]")
+        raise typer.Exit(code=1)
+
+    # Scan current environment
+    console.print("[bold blue]Scanning current environment for comparison...[/bold blue]\n")
+    results = _run_all_scanners()
+    current_manifest = _build_manifest(results, [])
+
+    # Compare packages
+    table = Table(title="Environment Diff")
+    table.add_column("Category", style="cyan")
+    table.add_column("In Snapshot Only", style="yellow")
+    table.add_column("In Local Only", style="green")
+    table.add_column("Common", style="dim")
+
+    # Brew
+    snap_brew = {p.name for p in manifest.packages.get("brew", [])}
+    curr_brew = {p.name for p in current_manifest.packages.get("brew", [])}
+    table.add_row(
+        "brew",
+        str(len(snap_brew - curr_brew)),
+        str(len(curr_brew - snap_brew)),
+        str(len(snap_brew & curr_brew)),
+    )
+
+    # pip
+    snap_pip = {p.name for p in manifest.packages.get("pip", [])}
+    curr_pip = {p.name for p in current_manifest.packages.get("pip", [])}
+    table.add_row(
+        "pip",
+        str(len(snap_pip - curr_pip)),
+        str(len(curr_pip - snap_pip)),
+        str(len(snap_pip & curr_pip)),
+    )
+
+    # npm
+    snap_npm = {p.name for p in manifest.packages.get("npm", [])}
+    curr_npm = {p.name for p in current_manifest.packages.get("npm", [])}
+    table.add_row(
+        "npm",
+        str(len(snap_npm - curr_npm)),
+        str(len(curr_npm - snap_npm)),
+        str(len(snap_npm & curr_npm)),
+    )
+
+    # env_vars
+    snap_env = {e.key for e in manifest.env_vars}
+    curr_env = {e.key for e in current_manifest.env_vars}
+    table.add_row(
+        "env_vars",
+        str(len(snap_env - curr_env)),
+        str(len(curr_env - snap_env)),
+        str(len(snap_env & curr_env)),
+    )
+
+    # dotfiles
+    snap_dot = {d.path for d in manifest.dotfiles}
+    curr_dot = {d.path for d in current_manifest.dotfiles}
+    table.add_row(
+        "dotfiles",
+        str(len(snap_dot - curr_dot)),
+        str(len(curr_dot - snap_dot)),
+        str(len(snap_dot & curr_dot)),
+    )
+
+    # vscode
+    snap_ext = set()
+    curr_ext = set()
+    if "vscode" in manifest.ide:
+        snap_ext = set(manifest.ide["vscode"].extensions)
+    if "vscode" in current_manifest.ide:
+        curr_ext = set(current_manifest.ide["vscode"].extensions)
+    table.add_row(
+        "vscode",
+        str(len(snap_ext - curr_ext)),
+        str(len(curr_ext - snap_ext)),
+        str(len(snap_ext & curr_ext)),
+    )
+
+    console.print(table)
+
+    # Show details of missing packages (in snapshot but not local)
+    missing_brew = sorted(snap_brew - curr_brew)
+    if missing_brew:
+        console.print("\n[yellow]Missing brew packages (in snapshot but not installed locally):[/yellow]")
+        for pkg in missing_brew[:20]:
+            console.print(f"  - {pkg}")
+        if len(missing_brew) > 20:
+            console.print(f"  ... and {len(missing_brew) - 20} more")
+
+    missing_pip = sorted(snap_pip - curr_pip)
+    if missing_pip:
+        console.print("\n[yellow]Missing pip packages:[/yellow]")
+        for pkg in missing_pip[:20]:
+            console.print(f"  - {pkg}")
+        if len(missing_pip) > 20:
+            console.print(f"  ... and {len(missing_pip) - 20} more")
+
+    missing_ext = sorted(snap_ext - curr_ext)
+    if missing_ext:
+        console.print("\n[yellow]Missing VS Code extensions:[/yellow]")
+        for ext in missing_ext[:20]:
+            console.print(f"  - {ext}")
+        if len(missing_ext) > 20:
+            console.print(f"  ... and {len(missing_ext) - 20} more")
+
+    logger.info("Diff completed against %s", file_path)
+
+
+@app.command()
 def inspect(
     file: str = typer.Argument(..., help="Path to .supersync file"),
 ) -> None:
@@ -337,6 +466,96 @@ def inspect(
 
     if "vscode" in manifest.ide:
         console.print(f"  VS Code extensions: {len(manifest.ide['vscode'].extensions)}")
+
+
+@app.command(name="list")
+def list_items(
+    file: str = typer.Argument(..., help="Path to .supersync file"),
+    category: Optional[str] = typer.Option(None, "--category", "-c", help="Filter by category: brew, pip, npm, env_vars, dotfiles, vscode"),
+) -> None:
+    """List detailed contents of a .supersync snapshot."""
+    from supersync.manifest.crypto import decrypt_data
+    from supersync.manifest.serializer import deserialize_manifest
+
+    file_path = Path(file)
+    if not file_path.exists():
+        console.print(f"[red]File not found: {file_path}[/red]")
+        raise typer.Exit(code=1)
+
+    password = typer.prompt("Enter decryption password", hide_input=True)
+
+    try:
+        encrypted_data = file_path.read_bytes()
+        yaml_data = decrypt_data(encrypted_data, password)
+        manifest = deserialize_manifest(yaml_data.decode("utf-8"))
+    except Exception as e:
+        console.print(f"[red]Decryption failed: {e}[/red]")
+        raise typer.Exit(code=1)
+
+    console.print(Panel(
+        f"Source: [cyan]{manifest.hostname}[/cyan]\n"
+        f"Platform: {manifest.platform}/{manifest.arch}\n"
+        f"Created: {manifest.created_at.strftime('%Y-%m-%d %H:%M:%S')}",
+        title="Snapshot Info",
+    ))
+
+    if category and category not in ("brew", "pip", "npm", "env_vars", "dotfiles", "vscode"):
+        console.print(f"[red]Unknown category: {category}. Valid: brew, pip, npm, env_vars, dotfiles, vscode[/red]")
+        raise typer.Exit(code=1)
+
+    if (not category or category == "brew") and "brew" in manifest.packages:
+        table = Table(title="Homebrew Packages")
+        table.add_column("Name", style="cyan")
+        table.add_column("Version")
+        table.add_column("Type")
+        for pkg in manifest.packages["brew"]:
+            table.add_row(pkg.name, pkg.version, pkg.package_type)
+        console.print(table)
+
+    if (not category or category == "pip") and "pip" in manifest.packages:
+        table = Table(title="Pip Packages")
+        table.add_column("Name", style="cyan")
+        table.add_column("Version")
+        for pkg in manifest.packages["pip"]:
+            table.add_row(pkg.name, pkg.version)
+        console.print(table)
+
+    if (not category or category == "npm") and "npm" in manifest.packages:
+        table = Table(title="NPM Packages")
+        table.add_column("Name", style="cyan")
+        table.add_column("Version")
+        for pkg in manifest.packages["npm"]:
+            table.add_row(pkg.name, pkg.version)
+        console.print(table)
+
+    if (not category or category == "env_vars") and manifest.env_vars:
+        table = Table(title="Environment Variables")
+        table.add_column("Key", style="cyan")
+        table.add_column("Value")
+        table.add_column("Config File")
+        for env in manifest.env_vars:
+            value = env.value if not env.value.startswith("-----") else "***"
+            table.add_row(env.key, value, env.config_file)
+        console.print(table)
+
+    if (not category or category == "dotfiles") and manifest.dotfiles:
+        table = Table(title="Dotfiles")
+        table.add_column("Path", style="cyan")
+        table.add_column("Sensitive")
+        table.add_column("Encrypted")
+        for df in manifest.dotfiles:
+            table.add_row(df.path, "Yes" if df.sensitive else "No", "Yes" if df.encrypted else "No")
+        console.print(table)
+
+    if (not category or category == "vscode") and "vscode" in manifest.ide:
+        vscode = manifest.ide["vscode"]
+        table = Table(title="VS Code Extensions")
+        table.add_column("Extension ID", style="cyan")
+        for ext in vscode.extensions:
+            table.add_row(ext)
+        console.print(table)
+        if vscode.settings_path:
+            console.print(f"  Settings: {vscode.settings_path}")
 
 
 def main() -> None:

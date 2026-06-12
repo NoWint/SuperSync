@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from typing import Optional
 
+from rich.progress import Progress, SpinnerColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn, TextColumn
+
 from supersync.manifest.schema import Manifest
 from supersync.provisioner.dependency import Step, StepType, topological_sort
 from supersync.provisioner.conflict import ConflictDetector, ConflictType
@@ -166,22 +168,40 @@ class ProvisionerEngine:
         current_category = ""
         category_report: Optional[CategoryReport] = None
 
-        for step in steps:
-            category_name = self._step_category(step)
+        if self.dry_run:
+            for step in steps:
+                category_name = self._step_category(step)
 
-            if category_name != current_category:
-                if category_report is not None:
-                    report.categories.append(category_report)
-                category_report = CategoryReport(category=category_name)
-                current_category = category_name
+                if category_name != current_category:
+                    if category_report is not None:
+                        report.categories.append(category_report)
+                    category_report = CategoryReport(category=category_name)
+                    current_category = category_name
 
-            if self.dry_run:
                 category_report.total += 1
                 category_report.success += 1
-                continue
+        else:
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                TaskProgressColumn(),
+                TimeElapsedColumn(),
+            ) as progress:
+                task = progress.add_task("Restoring...", total=len(steps))
+                for step in steps:
+                    category_name = self._step_category(step)
 
-            result = self._execute_step(step)
-            category_report.add(result)
+                    if category_name != current_category:
+                        if category_report is not None:
+                            report.categories.append(category_report)
+                        category_report = CategoryReport(category=category_name)
+                        current_category = category_name
+
+                    progress.update(task, description=f"[{category_name}] {step.name}")
+                    result = self._execute_step(step)
+                    category_report.add(result)
+                    progress.advance(task)
 
         if category_report is not None:
             report.categories.append(category_report)

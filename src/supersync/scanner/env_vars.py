@@ -1,3 +1,4 @@
+import os
 import re
 from pathlib import Path
 
@@ -8,7 +9,23 @@ SENSITIVE_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
-SHELL_CONFIGS = [".zshrc", ".bashrc", ".bash_profile"]
+EXPORT_PATTERN = re.compile(r'^export\s+(\w+)=(.+)$', re.MULTILINE)
+
+
+def _detect_shell_configs() -> list[str]:
+    """Auto-detect the current shell and return appropriate config files."""
+    shell = os.environ.get("SHELL", "")
+    if "zsh" in shell:
+        return [".zshrc", ".zprofile"]
+    elif "bash" in shell:
+        return [".bashrc", ".bash_profile"]
+    elif "fish" in shell:
+        return [".config/fish/config.fish"]
+    else:
+        return [".zshrc", ".bashrc", ".bash_profile"]
+
+
+SHELL_CONFIGS = _detect_shell_configs()
 
 EXPORT_PATTERN = re.compile(r'^export\s+(\w+)=(.+)$', re.MULTILINE)
 
