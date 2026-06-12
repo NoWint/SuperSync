@@ -31,8 +31,12 @@ class BrewScanner(ScannerBase):
                 items.append(Item(name=name, version=version, source="brew", extra={"type": "formula"}))
 
             for cask in info_data.get("casks", []):
-                name = cask["name"]
+                raw_name = cask["name"]
+                # Cask name can be a list (e.g., ['BlackHole 2ch']) or a string
+                name = raw_name[0] if isinstance(raw_name, list) else raw_name
                 version = cask.get("version", "unknown")
+                if isinstance(version, list):
+                    version = version[0] if version else "unknown"
                 items.append(Item(name=name, version=version, source="brew", extra={"type": "cask"}))
 
         except Exception as e:
