@@ -66,8 +66,20 @@ class Installer:
         else:
             return InstallResult(name=extension_id, status=InstallStatus.FAILED, message=result.stderr.strip())
 
-    def inject_env_var(self, key: str, value: str, config_file: str = ".zshrc") -> InstallResult:
+    def inject_env_var(self, key: str, value: str, config_file: str = "") -> InstallResult:
         from pathlib import Path
+        import os
+
+        if not config_file:
+            shell = os.environ.get("SHELL", "")
+            if "zsh" in shell:
+                config_file = ".zshrc"
+            elif "bash" in shell:
+                config_file = ".bashrc"
+            elif "fish" in shell:
+                config_file = ".config/fish/config.fish"
+            else:
+                config_file = ".zshrc"
 
         config_path = Path(config_file).expanduser()
         if not config_path.is_absolute():
@@ -81,6 +93,7 @@ class Installer:
                 if f"export {key}=" in content:
                     return InstallResult(name=key, status=InstallStatus.SKIPPED, message="Already defined")
 
+            config_path.parent.mkdir(parents=True, exist_ok=True)
             with open(config_path, "a") as f:
                 f.write(export_line)
 

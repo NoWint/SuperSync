@@ -27,8 +27,6 @@ def _detect_shell_configs() -> list[str]:
 
 SHELL_CONFIGS = _detect_shell_configs()
 
-EXPORT_PATTERN = re.compile(r'^export\s+(\w+)=(.+)$', re.MULTILINE)
-
 
 class EnvVarsScanner(ScannerBase):
     """Scans shell config files for exported environment variables."""

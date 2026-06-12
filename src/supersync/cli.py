@@ -266,6 +266,7 @@ def restore(
     file: str = typer.Argument(..., help="Path to .supersync file"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview only, do not execute"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Auto-confirm all prompts"),
+    only: Optional[str] = typer.Option(None, "--only", help="Only restore specific categories (comma-separated: brew,pip,npm,env_vars,dotfiles,vscode)"),
 ) -> None:
     """Restore development environment from a .supersync file."""
     from supersync.manifest.crypto import decrypt_data
@@ -286,6 +287,21 @@ def restore(
     except Exception as e:
         console.print(f"[red]Decryption failed: {e}[/red]")
         raise typer.Exit(code=1)
+
+    if only:
+        categories = [c.strip() for c in only.split(",")]
+        if "brew" not in categories:
+            manifest.packages.pop("brew", None)
+        if "pip" not in categories:
+            manifest.packages.pop("pip", None)
+        if "npm" not in categories:
+            manifest.packages.pop("npm", None)
+        if "env_vars" not in categories:
+            manifest.env_vars = []
+        if "dotfiles" not in categories:
+            manifest.dotfiles = []
+        if "vscode" not in categories:
+            manifest.ide.pop("vscode", None)
 
     console.print(Panel(f"Environment from [cyan]{manifest.hostname}[/cyan] ({manifest.platform}/{manifest.arch})", title="Manifest"))
 
