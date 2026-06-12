@@ -66,10 +66,13 @@ class Installer:
         else:
             return InstallResult(name=extension_id, status=InstallStatus.FAILED, message=result.stderr.strip())
 
-    def inject_env_var(self, key: str, value: str, shell_config: str = "~/.zshrc") -> InstallResult:
+    def inject_env_var(self, key: str, value: str, config_file: str = ".zshrc") -> InstallResult:
         from pathlib import Path
 
-        config_path = Path(shell_config).expanduser()
+        config_path = Path(config_file).expanduser()
+        if not config_path.is_absolute():
+            config_path = Path.home() / config_file
+
         export_line = f'export {key}="{value}"\n'
 
         try:

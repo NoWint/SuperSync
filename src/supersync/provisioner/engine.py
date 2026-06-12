@@ -5,6 +5,7 @@ from supersync.manifest.schema import Manifest
 from supersync.provisioner.dependency import Step, StepType, topological_sort
 from supersync.provisioner.conflict import ConflictDetector, ConflictType
 from supersync.provisioner.installer import Installer, InstallResult, InstallStatus
+from supersync.utils.logger import get_logger
 
 
 @dataclass
@@ -62,6 +63,8 @@ class RestoreReport:
 class ProvisionerEngine:
     """Orchestrates the restoration of a development environment."""
 
+    logger = get_logger()
+
     def __init__(
         self,
         manifest: Manifest,
@@ -107,6 +110,7 @@ class ProvisionerEngine:
                 name=env.key,
                 content=env.value,
                 source="env_vars",
+                extra={"config_file": env.config_file},
             ))
 
         for dotfile in self.manifest.dotfiles:
@@ -182,6 +186,7 @@ class ProvisionerEngine:
         if category_report is not None:
             report.categories.append(category_report)
 
+        self.logger.info("Restore report: %s", report.format())
         return report
 
     def _step_category(self, step: Step) -> str:
@@ -198,6 +203,7 @@ class ProvisionerEngine:
         return mapping.get(step.type, step.source)
 
     def _execute_step(self, step: Step) -> InstallResult:
+        self.logger.info("Executing: %s %s", step.type.name, step.name)
         if step.type == StepType.BREW_FORMULA:
             return self.installer.install_brew_formula(step.name, step.version or "")
         elif step.type == StepType.BREW_CASK:
@@ -207,9 +213,27 @@ class ProvisionerEngine:
         elif step.type == StepType.NPM_PACKAGE:
             return self.installer.install_npm_package(step.name, step.version or "")
         elif step.type == StepType.ENV_VAR:
-            return self.installer.inject_env_var(step.name, step.content or "")
+            return self.installer.inject_env_var(step.name, step.content or "", config_file=step.extra.get("config_file", ".zshrc"))
         elif step.type == StepType.DOTFILE:
-            return self.installer.deploy_dotfile(step.name, step.content or "", backup=True)
+            content = step.content or ""
+            if step.encrypted:
+                # Need to decrypt the content first
+                import base64
+                from supersync.manifest.crypto import decrypt_data
+                # The content is base64-encoded encrypted data
+                # We need to ask for the secondary password
+                if not hasattr(self, '_sensitive_password'):
+                    import typer
+                    self._sensitive_password = typer.prompt(
+                        "Enter password for encrypted sensitive items", hide_input=True
+                    )
+                try:
+                    encrypted_bytes = base64.b64decode(content)
+                    decrypted_bytes = decrypt_data(encrypted_bytes, self._sensitive_password)
+                    content = base64.b64encode(decrypted_bytes).decode("ascii")
+                except Exception:
+                    return InstallResult(name=step.name, status=InstallStatus.FAILED, message="Failed to decrypt sensitive item (wrong password?)")
+            return self.installer.deploy_dotfile(step.name, content, backup=True)
         elif step.type == StepType.IDE_EXTENSION:
             return self.installer.install_vscode_extension(step.name)
         elif step.type == StepType.VSCODE_SETTINGS:

@@ -28,6 +28,7 @@ class NpmPackage(BaseModel):
 class EnvVar(BaseModel):
     key: str
     value: str
+    config_file: str = ".zshrc"
 
 
 class Dotfile(BaseModel):

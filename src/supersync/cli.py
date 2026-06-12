@@ -26,6 +26,7 @@ from supersync.manifest.schema import (
 )
 from supersync.manifest.serializer import serialize_manifest
 from supersync.manifest.crypto import encrypt_data
+from supersync.utils.logger import get_logger
 
 app = typer.Typer(
     name="supersync",
@@ -33,6 +34,7 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 console = Console()
+logger = get_logger()
 
 
 def _version_callback(value: bool):
@@ -138,7 +140,7 @@ def _build_manifest(results: list[ScanResult], sensitive_choices: list[tuple[str
 
         elif result.source == "env_vars":
             for item in result.items:
-                env_vars.append(EnvVar(key=item.name, value=item.content or ""))
+                env_vars.append(EnvVar(key=item.name, value=item.content or "", config_file=item.extra.get("config_file", ".zshrc")))
 
         elif result.source == "dotfiles":
             for item in result.items:
@@ -256,6 +258,7 @@ def scan(
 
     console.print(f"\n[bold green]Environment snapshot saved to {output_path}[/bold green]")
     console.print(f"File size: {len(encrypted):,} bytes")
+    logger.info("Scan completed: %d items, saved to %s", sum(len(r.items) for r in results), output_path)
 
 
 @app.command()
@@ -290,6 +293,7 @@ def restore(
     report = engine.run()
 
     console.print(report.format())
+    logger.info("Restore completed from %s", file_path)
 
 
 @app.command()
