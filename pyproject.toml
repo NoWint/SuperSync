@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "supersync"
+version = "0.1.0"
+description = "Cross-device development environment migration tool"
+requires-python = ">=3.11"
+dependencies = [
+    "typer>=0.12.0",
+    "pydantic>=2.0",
+    "cryptography>=42.0",
+    "rich>=13.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-mock>=3.12",
+]
+
+[project.scripts]
+supersync = "supersync.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/supersync"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
