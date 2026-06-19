@@ -6,6 +6,8 @@ from typing import Optional
 class StepType(IntEnum):
     BREW_FORMULA = 10
     BREW_CASK = 11
+    WINGET_PACKAGE = 12
+    SCOOP_PACKAGE = 13
     PIP_PACKAGE = 20
     NPM_PACKAGE = 21
     ENV_VAR = 30

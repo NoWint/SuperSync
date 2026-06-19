@@ -36,6 +36,22 @@ class Installer:
                 parts = result.stdout.strip().split()
                 if len(parts) >= 2:
                     return parts[-1]
+        elif manager == "winget":
+            result = run_command("winget", "list", "--id", name, "--source", "winget", "--disable-interactivity", check=False)
+            if result.returncode == 0 and name in result.stdout:
+                # Parse version from winget list output
+                for line in result.stdout.strip().split("\n"):
+                    if name in line:
+                        parts = line.split()
+                        if len(parts) >= 2:
+                            return parts[-1]
+        elif manager == "scoop":
+            result = run_command("scoop", "list", check=False)
+            if result.returncode == 0:
+                for line in result.stdout.strip().split("\n"):
+                    parts = line.split()
+                    if len(parts) >= 2 and parts[0] == name:
+                        return parts[1]
         elif manager == "pip":
             result = run_command("pip", "show", name, check=False)
             if result.returncode == 0:
@@ -181,36 +197,84 @@ class Installer:
         else:
             return InstallResult(name=extension_id, status=InstallStatus.FAILED, message=result.stderr.strip())
 
+    def install_winget_package(self, name: str, version: str, auto_confirm: bool = False) -> InstallResult:
+        installed = self._get_installed_version("winget", name)
+        if installed:
+            if installed == version.lstrip("="):
+                return InstallResult(name=name, status=InstallStatus.SKIPPED, message=f"Already installed v{installed}")
+            if not auto_confirm:
+                import typer
+                action = typer.prompt(
+                    f"  {name}: installed v{installed}, snapshot v{version}. Action",
+                    type=typer.Choice(["skip", "upgrade"]),
+                    default="skip",
+                )
+                if action == "skip":
+                    return InstallResult(name=name, status=InstallStatus.SKIPPED, message=f"Kept v{installed}")
+            result = run_command("winget", "upgrade", "--id", name, "--source", "winget", "--accept-package-agreements", "--accept-source-agreements", check=False)
+            if result.returncode == 0:
+                return InstallResult(name=name, status=InstallStatus.SUCCESS)
+            return InstallResult(name=name, status=InstallStatus.FAILED, message=result.stderr.strip())
+
+        result = run_command("winget", "install", "--id", name, "--source", "winget", "--accept-package-agreements", "--accept-source-agreements", check=False)
+        if result.returncode == 0:
+            return InstallResult(name=name, status=InstallStatus.SUCCESS)
+        if "already installed" in result.stdout.lower():
+            return InstallResult(name=name, status=InstallStatus.SKIPPED, message="Already installed")
+        return InstallResult(name=name, status=InstallStatus.FAILED, message=result.stderr.strip())
+
+    def install_scoop_package(self, name: str, version: str, auto_confirm: bool = False) -> InstallResult:
+        installed = self._get_installed_version("scoop", name)
+        if installed:
+            if installed == version.lstrip("="):
+                return InstallResult(name=name, status=InstallStatus.SKIPPED, message=f"Already installed v{installed}")
+            if not auto_confirm:
+                import typer
+                action = typer.prompt(
+                    f"  {name}: installed v{installed}, snapshot v{version}. Action",
+                    type=typer.Choice(["skip", "upgrade"]),
+                    default="skip",
+                )
+                if action == "skip":
+                    return InstallResult(name=name, status=InstallStatus.SKIPPED, message=f"Kept v{installed}")
+            result = run_command("scoop", "update", name, check=False)
+            if result.returncode == 0:
+                return InstallResult(name=name, status=InstallStatus.SUCCESS)
+            return InstallResult(name=name, status=InstallStatus.FAILED, message=result.stderr.strip())
+
+        result = run_command("scoop", "install", name, check=False)
+        if result.returncode == 0:
+            return InstallResult(name=name, status=InstallStatus.SUCCESS)
+        return InstallResult(name=name, status=InstallStatus.FAILED, message=result.stderr.strip())
+
     def inject_env_var(self, key: str, value: str, config_file: str = "") -> InstallResult:
         from pathlib import Path
-        import os
+        from supersync.utils.platform import get_default_shell_config_file, is_windows
 
         if not config_file:
-            shell = os.environ.get("SHELL", "")
-            if "zsh" in shell:
-                config_file = ".zshrc"
-            elif "bash" in shell:
-                config_file = ".bashrc"
-            elif "fish" in shell:
-                config_file = ".config/fish/config.fish"
-            else:
-                config_file = ".zshrc"
+            config_file = get_default_shell_config_file()
 
         config_path = Path(config_file).expanduser()
         if not config_path.is_absolute():
             config_path = Path.home() / config_file
 
-        export_line = f'export {key}="{value}"\n'
+        # Choose injection syntax based on config file type
+        if config_file.endswith(".ps1"):
+            inject_line = f'$env:{key} = "{value}"\n'
+            already_defined_check = f"$env:{key} ="
+        else:
+            inject_line = f'export {key}="{value}"\n'
+            already_defined_check = f"export {key}="
 
         try:
             if config_path.exists():
                 content = config_path.read_text()
-                if f"export {key}=" in content:
+                if already_defined_check in content:
                     return InstallResult(name=key, status=InstallStatus.SKIPPED, message="Already defined")
 
             config_path.parent.mkdir(parents=True, exist_ok=True)
             with open(config_path, "a") as f:
-                f.write(export_line)
+                f.write(inject_line)
 
             return InstallResult(name=key, status=InstallStatus.SUCCESS)
 

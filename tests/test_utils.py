@@ -1,8 +1,9 @@
+import sys
 from supersync.utils.run import run_command
 
 
 def test_run_command_success():
-    result = run_command("echo", "hello")
+    result = run_command(sys.executable, "-c", "print('hello')")
     assert result.returncode == 0
     assert "hello" in result.stdout
 

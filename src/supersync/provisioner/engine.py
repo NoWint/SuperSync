@@ -90,6 +90,22 @@ class ProvisionerEngine:
                 source="brew",
             ))
 
+        for pkg in self.manifest.packages.get("winget", []):
+            steps.append(Step(
+                type=StepType.WINGET_PACKAGE,
+                name=pkg.name,
+                version=pkg.version,
+                source="winget",
+            ))
+
+        for pkg in self.manifest.packages.get("scoop", []):
+            steps.append(Step(
+                type=StepType.SCOOP_PACKAGE,
+                name=pkg.name,
+                version=pkg.version,
+                source="scoop",
+            ))
+
         for pkg in self.manifest.packages.get("pip", []):
             steps.append(Step(
                 type=StepType.PIP_PACKAGE,
@@ -213,6 +229,8 @@ class ProvisionerEngine:
         mapping = {
             StepType.BREW_FORMULA: "brew",
             StepType.BREW_CASK: "brew",
+            StepType.WINGET_PACKAGE: "winget",
+            StepType.SCOOP_PACKAGE: "scoop",
             StepType.PIP_PACKAGE: "pip",
             StepType.NPM_PACKAGE: "npm",
             StepType.ENV_VAR: "env_vars",
@@ -228,12 +246,16 @@ class ProvisionerEngine:
             return self.installer.install_brew_formula(step.name, step.version or "", auto_confirm=self.auto_confirm)
         elif step.type == StepType.BREW_CASK:
             return self.installer.install_brew_cask(step.name, step.version or "", auto_confirm=self.auto_confirm)
+        elif step.type == StepType.WINGET_PACKAGE:
+            return self.installer.install_winget_package(step.name, step.version or "", auto_confirm=self.auto_confirm)
+        elif step.type == StepType.SCOOP_PACKAGE:
+            return self.installer.install_scoop_package(step.name, step.version or "", auto_confirm=self.auto_confirm)
         elif step.type == StepType.PIP_PACKAGE:
             return self.installer.install_pip_package(step.name, step.version or "", auto_confirm=self.auto_confirm)
         elif step.type == StepType.NPM_PACKAGE:
             return self.installer.install_npm_package(step.name, step.version or "", auto_confirm=self.auto_confirm)
         elif step.type == StepType.ENV_VAR:
-            return self.installer.inject_env_var(step.name, step.content or "", config_file=step.extra.get("config_file", ".zshrc"))
+            return self.installer.inject_env_var(step.name, step.content or "", config_file=step.extra.get("config_file", ""))
         elif step.type == StepType.DOTFILE:
             content = step.content or ""
             if step.encrypted:

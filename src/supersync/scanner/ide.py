@@ -4,8 +4,7 @@ from pathlib import Path
 
 from supersync.scanner.base import Item, ScanResult, ScannerBase
 from supersync.utils.run import run_command, run_command_optional
-
-VSCODE_SETTINGS_PATH = "Library/Application Support/Code/User/settings.json"
+from supersync.utils.platform import get_vscode_settings_path
 
 SENSITIVE_SETTINGS_PATTERNS = re.compile(
     r"(token|secret|key|password|credential|auth)",
@@ -44,7 +43,8 @@ class IdeScanner(ScannerBase):
         except Exception as e:
             errors.append(f"Failed to scan VS Code extensions: {e}")
 
-        settings_path = Path.home() / VSCODE_SETTINGS_PATH
+        vscode_settings_path = get_vscode_settings_path()
+        settings_path = Path.home() / vscode_settings_path
         if settings_path.exists():
             try:
                 content = base64.b64encode(settings_path.read_bytes()).decode("ascii")
@@ -54,7 +54,7 @@ class IdeScanner(ScannerBase):
 
                 item = Item(
                     name="settings.json",
-                    path=VSCODE_SETTINGS_PATH,
+                    path=vscode_settings_path,
                     content=content,
                     source="ide",
                     sensitive=is_sensitive,
