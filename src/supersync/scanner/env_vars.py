@@ -3,6 +3,7 @@ import re
 from pathlib import Path
 
 from supersync.scanner.base import Item, ScanResult, ScannerBase
+from supersync.utils.platform import get_shell_config_files, is_windows
 
 SENSITIVE_PATTERNS = re.compile(
     r"(token|secret|key|password|credential|auth|api_key|private)",
@@ -11,21 +12,11 @@ SENSITIVE_PATTERNS = re.compile(
 
 EXPORT_PATTERN = re.compile(r'^export\s+(\w+)=(.+)$', re.MULTILINE)
 
-
-def _detect_shell_configs() -> list[str]:
-    """Auto-detect the current shell and return appropriate config files."""
-    shell = os.environ.get("SHELL", "")
-    if "zsh" in shell:
-        return [".zshrc", ".zprofile"]
-    elif "bash" in shell:
-        return [".bashrc", ".bash_profile"]
-    elif "fish" in shell:
-        return [".config/fish/config.fish"]
-    else:
-        return [".zshrc", ".bashrc", ".bash_profile"]
-
-
-SHELL_CONFIGS = _detect_shell_configs()
+# PowerShell env var patterns:
+# $env:KEY = "VALUE"
+# $env:KEY = 'VALUE'
+# $env:KEY = VALUE
+PS_ENV_PATTERN = re.compile(r'^\$env:(\w+)\s*=\s*["\']?(.+?)["\']?\s*$', re.MULTILINE)
 
 
 class EnvVarsScanner(ScannerBase):
@@ -37,15 +28,23 @@ class EnvVarsScanner(ScannerBase):
         errors: list[str] = []
 
         home = Path.home()
+        config_files = get_shell_config_files()
 
-        for config_file in SHELL_CONFIGS:
+        for config_file in config_files:
             config_path = home / config_file
             if not config_path.exists():
                 continue
 
             try:
                 content = config_path.read_text()
-                for match in EXPORT_PATTERN.finditer(content):
+
+                # Choose pattern based on file type
+                if config_file.endswith(".ps1"):
+                    pattern = PS_ENV_PATTERN
+                else:
+                    pattern = EXPORT_PATTERN
+
+                for match in pattern.finditer(content):
                     name = match.group(1)
                     value = match.group(2).strip().strip('"').strip("'")
 

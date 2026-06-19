@@ -25,10 +25,22 @@ class NpmPackage(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class WingetPackage(BaseModel):
+    name: str
+    version: str
+    source: str = "winget"
+
+
+class ScoopPackage(BaseModel):
+    name: str
+    version: str
+    bucket: str = ""
+
+
 class EnvVar(BaseModel):
     key: str
     value: str
-    config_file: str = ".zshrc"
+    config_file: str = ""
 
 
 class Dotfile(BaseModel):
@@ -50,7 +62,7 @@ class Manifest(BaseModel):
     hostname: str = ""
     platform: str = ""
     arch: str = ""
-    packages: dict[str, list[BrewPackage | PipPackage | NpmPackage]] = Field(default_factory=dict)
+    packages: dict[str, list[BrewPackage | PipPackage | NpmPackage | WingetPackage | ScoopPackage]] = Field(default_factory=dict)
     env_vars: list[EnvVar] = Field(default_factory=list)
     dotfiles: list[Dotfile] = Field(default_factory=list)
     ide: dict[str, VscodeConfig] = Field(default_factory=dict)

@@ -2,17 +2,7 @@ import base64
 from pathlib import Path
 
 from supersync.scanner.base import Item, ScanResult, ScannerBase
-
-DOTFILES_PATHS = [
-    ".zshrc",
-    ".bashrc",
-    ".bash_profile",
-    ".gitconfig",
-    ".gitignore_global",
-    ".vimrc",
-    ".editorconfig",
-    ".config/starship.toml",
-]
+from supersync.utils.platform import get_dotfiles_paths, is_windows
 
 SSH_DIR = ".ssh"
 SSH_FILES = ["config", "known_hosts"]
@@ -27,8 +17,9 @@ class DotfilesScanner(ScannerBase):
         errors: list[str] = []
 
         home = Path.home()
+        dotfiles_paths = get_dotfiles_paths()
 
-        for rel_path in DOTFILES_PATHS:
+        for rel_path in dotfiles_paths:
             file_path = home / rel_path
             if not file_path.exists():
                 continue

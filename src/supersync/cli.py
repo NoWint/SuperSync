@@ -9,17 +9,19 @@ from rich.table import Table
 
 from supersync import __version__
 from supersync.scanner.base import ScanResult, Item
-from supersync.scanner.brew import BrewScanner
 from supersync.scanner.pip_scanner import PipScanner
 from supersync.scanner.npm import NpmScanner
 from supersync.scanner.env_vars import EnvVarsScanner
 from supersync.scanner.dotfiles import DotfilesScanner
 from supersync.scanner.ide import IdeScanner
+from supersync.utils.platform import get_platform, is_windows, is_macos, get_default_shell_config_file
 from supersync.manifest.schema import (
     Manifest,
     BrewPackage,
     PipPackage,
     NpmPackage,
+    WingetPackage,
+    ScoopPackage,
     EnvVar,
     Dotfile,
     VscodeConfig,
@@ -53,14 +55,26 @@ def main(
 
 
 def _run_all_scanners() -> list[ScanResult]:
-    scanners = [
-        BrewScanner(),
+    scanners = []
+
+    # Platform-specific scanners
+    if is_macos():
+        from supersync.scanner.brew import BrewScanner
+        scanners.append(BrewScanner())
+    elif is_windows():
+        from supersync.scanner.winget import WingetScanner
+        from supersync.scanner.scoop import ScoopScanner
+        scanners.append(WingetScanner())
+        scanners.append(ScoopScanner())
+
+    # Cross-platform scanners
+    scanners.extend([
         PipScanner(),
         NpmScanner(),
         EnvVarsScanner(),
         DotfilesScanner(),
         IdeScanner(),
-    ]
+    ])
 
     results = []
     for scanner in scanners:
@@ -116,6 +130,8 @@ def _build_manifest(results: list[ScanResult], sensitive_choices: list[tuple[str
     import platform
 
     brew_packages = []
+    winget_packages = []
+    scoop_packages = []
     pip_packages = []
     npm_packages = []
     env_vars = []
@@ -130,6 +146,15 @@ def _build_manifest(results: list[ScanResult], sensitive_choices: list[tuple[str
                 pkg_type = item.extra.get("type", "formula")
                 brew_packages.append(BrewPackage(name=item.name, version=item.version or "unknown", package_type=pkg_type))
 
+        elif result.source == "winget":
+            for item in result.items:
+                winget_packages.append(WingetPackage(name=item.name, version=item.version or "unknown"))
+
+        elif result.source == "scoop":
+            for item in result.items:
+                bucket = item.extra.get("bucket", "")
+                scoop_packages.append(ScoopPackage(name=item.name, version=item.version or "unknown", bucket=bucket))
+
         elif result.source == "pip":
             for item in result.items:
                 pip_packages.append(PipPackage(name=item.name, version=item.version or "unknown"))
@@ -140,7 +165,7 @@ def _build_manifest(results: list[ScanResult], sensitive_choices: list[tuple[str
 
         elif result.source == "env_vars":
             for item in result.items:
-                env_vars.append(EnvVar(key=item.name, value=item.content or "", config_file=item.extra.get("config_file", ".zshrc")))
+                env_vars.append(EnvVar(key=item.name, value=item.content or "", config_file=item.extra.get("config_file", get_default_shell_config_file())))
 
         elif result.source == "dotfiles":
             for item in result.items:
@@ -178,6 +203,10 @@ def _build_manifest(results: list[ScanResult], sensitive_choices: list[tuple[str
     packages = {}
     if brew_packages:
         packages["brew"] = brew_packages
+    if winget_packages:
+        packages["winget"] = winget_packages
+    if scoop_packages:
+        packages["scoop"] = scoop_packages
     if pip_packages:
         packages["pip"] = pip_packages
     if npm_packages:
@@ -194,7 +223,7 @@ def _build_manifest(results: list[ScanResult], sensitive_choices: list[tuple[str
     return Manifest(
         version="1.0",
         hostname=platform.node(),
-        platform="macos",
+        platform=get_platform(),
         arch=platform.machine(),
         packages=packages,
         env_vars=env_vars,
@@ -266,7 +295,7 @@ def restore(
     file: str = typer.Argument(..., help="Path to .supersync file"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview only, do not execute"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Auto-confirm all prompts"),
-    only: Optional[str] = typer.Option(None, "--only", help="Only restore specific categories (comma-separated: brew,pip,npm,env_vars,dotfiles,vscode)"),
+    only: Optional[str] = typer.Option(None, "--only", help="Only restore specific categories (comma-separated: brew,winget,scoop,pip,npm,env_vars,dotfiles,vscode)"),
 ) -> None:
     """Restore development environment from a .supersync file."""
     from supersync.manifest.crypto import decrypt_data
@@ -292,6 +321,10 @@ def restore(
         categories = [c.strip() for c in only.split(",")]
         if "brew" not in categories:
             manifest.packages.pop("brew", None)
+        if "winget" not in categories:
+            manifest.packages.pop("winget", None)
+        if "scoop" not in categories:
+            manifest.packages.pop("scoop", None)
         if "pip" not in categories:
             manifest.packages.pop("pip", None)
         if "npm" not in categories:
@@ -355,6 +388,26 @@ def diff(
         str(len(snap_brew - curr_brew)),
         str(len(curr_brew - snap_brew)),
         str(len(snap_brew & curr_brew)),
+    )
+
+    # Winget
+    snap_winget = {p.name for p in manifest.packages.get("winget", [])}
+    curr_winget = {p.name for p in current_manifest.packages.get("winget", [])}
+    table.add_row(
+        "winget",
+        str(len(snap_winget - curr_winget)),
+        str(len(curr_winget - snap_winget)),
+        str(len(snap_winget & curr_winget)),
+    )
+
+    # Scoop
+    snap_scoop = {p.name for p in manifest.packages.get("scoop", [])}
+    curr_scoop = {p.name for p in current_manifest.packages.get("scoop", [])}
+    table.add_row(
+        "scoop",
+        str(len(snap_scoop - curr_scoop)),
+        str(len(curr_scoop - snap_scoop)),
+        str(len(snap_scoop & curr_scoop)),
     )
 
     # pip
@@ -422,6 +475,14 @@ def diff(
         if len(missing_brew) > 20:
             console.print(f"  ... and {len(missing_brew) - 20} more")
 
+    missing_winget = sorted(snap_winget - curr_winget)
+    if missing_winget:
+        console.print("\n[yellow]Missing winget packages:[/yellow]")
+        for pkg in missing_winget[:20]:
+            console.print(f"  - {pkg}")
+        if len(missing_winget) > 20:
+            console.print(f"  ... and {len(missing_winget) - 20} more")
+
     missing_pip = sorted(snap_pip - curr_pip)
     if missing_pip:
         console.print("\n[yellow]Missing pip packages:[/yellow]")
@@ -470,6 +531,12 @@ def inspect(
 
     if "brew" in manifest.packages:
         console.print(f"\n  Brew packages: {len([p for p in manifest.packages['brew'] if p.package_type == 'formula'])} formulae, {len([p for p in manifest.packages['brew'] if p.package_type == 'cask'])} casks")
+
+    if "winget" in manifest.packages:
+        console.print(f"  Winget packages: {len(manifest.packages['winget'])}")
+
+    if "scoop" in manifest.packages:
+        console.print(f"  Scoop packages: {len(manifest.packages['scoop'])}")
 
     if "pip" in manifest.packages:
         console.print(f"  Pip packages: {len(manifest.packages['pip'])}")
@@ -536,7 +603,7 @@ def update(
 @app.command(name="list")
 def list_items(
     file: str = typer.Argument(..., help="Path to .supersync file"),
-    category: Optional[str] = typer.Option(None, "--category", "-c", help="Filter by category: brew, pip, npm, env_vars, dotfiles, vscode"),
+    category: Optional[str] = typer.Option(None, "--category", "-c", help="Filter by category: brew, winget, scoop, pip, npm, env_vars, dotfiles, vscode"),
 ) -> None:
     """List detailed contents of a .supersync snapshot."""
     from supersync.manifest.crypto import decrypt_data
@@ -564,8 +631,9 @@ def list_items(
         title="Snapshot Info",
     ))
 
-    if category and category not in ("brew", "pip", "npm", "env_vars", "dotfiles", "vscode"):
-        console.print(f"[red]Unknown category: {category}. Valid: brew, pip, npm, env_vars, dotfiles, vscode[/red]")
+    valid_categories = ("brew", "winget", "scoop", "pip", "npm", "env_vars", "dotfiles", "vscode")
+    if category and category not in valid_categories:
+        console.print(f"[red]Unknown category: {category}. Valid: {', '.join(valid_categories)}[/red]")
         raise typer.Exit(code=1)
 
     if (not category or category == "brew") and "brew" in manifest.packages:
@@ -575,6 +643,24 @@ def list_items(
         table.add_column("Type")
         for pkg in manifest.packages["brew"]:
             table.add_row(pkg.name, pkg.version, pkg.package_type)
+        console.print(table)
+
+    if (not category or category == "winget") and "winget" in manifest.packages:
+        table = Table(title="Winget Packages")
+        table.add_column("Name", style="cyan")
+        table.add_column("Version")
+        table.add_column("Source")
+        for pkg in manifest.packages["winget"]:
+            table.add_row(pkg.name, pkg.version, pkg.source)
+        console.print(table)
+
+    if (not category or category == "scoop") and "scoop" in manifest.packages:
+        table = Table(title="Scoop Packages")
+        table.add_column("Name", style="cyan")
+        table.add_column("Version")
+        table.add_column("Bucket")
+        for pkg in manifest.packages["scoop"]:
+            table.add_row(pkg.name, pkg.version, pkg.bucket)
         console.print(table)
 
     if (not category or category == "pip") and "pip" in manifest.packages:
